@@ -1,6 +1,7 @@
 import torchvision.datasets
 import torch.nn as nn
 import torch.nn.functional as f
+import torch.optim
 from torchvision.transforms import ToTensor
 from collections import defaultdict
 from PIL import Image
@@ -16,8 +17,13 @@ class Data:
         self.list = [ i for i in open(self.train) ]
     def __getitem__(self,idx):
         filename,age,gender,race,service_test = self.list[idx+1].split(",")
+        print(age)
         im = self.tt(Image.open("../fairFace/" + filename))
-        return im.unsqueeze(0), 1 if gender == "Male" else 0
+        lw, up = age.split("-")
+        age = int(lw) + int(up) / 2
+        return im.unsqueeze(0), 1 if age < 30 else 0
+    def setTest(self):
+        self.list = [ i for i in open(self.val) ]
 
 class Net(nn.Module):
     def __init__(self):
@@ -33,9 +39,45 @@ class Net(nn.Module):
         x = f.max_pool2d( f.relu(self.c2(x)) ,kernel_size= 2)
         x = x.view(-1, 11 * 11 * 3)
         x = f.relu(self.fc3(x))
-        x = f.softmax(self.fc4(x))
+        x = f.softmax(self.fc4(x),dim=1)
         return x
 
+def train(model,data,epochs=100):
+    model.cuda()
+    loss = f.cross_entropy
+    op = torch.optim.SGD(model.parameters(),momentum=0.1,lr=0.01)
+    for i in range(epochs):
+        epoch(model,data,loss,op)
+
+def test(model,data):
+    subset = 10
+    d = {0:0, 1:0}
+    for i in range(subset):
+        im, tg = data[i]
+        im = im.cuda()
+        tg = torch.tensor([tg]).cuda()
+        ot = model(im)
+
+
+def epoch(model,data,loss,op):
+    subset = 10
+    la = torch.tensor(0)
+    for i in range(subset):
+        im, tg = data[i]
+        im = im.cuda()
+        tg = torch.tensor([tg]).cuda()
+        ot = model(im)
+        ls = loss(ot,tg)
+        la = la + ls
+        la = la.detach()
+        ls.backward()
+        op.step()
+        op.zero_grad()
+    print(la/subset)
+
 model = Net()
+model = model.cuda()
 data = Data()
-print(model(data[0][0]))
+#train(model,data)
+data.setTest()
+test(model,data)
