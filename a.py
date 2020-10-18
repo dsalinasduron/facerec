@@ -5,49 +5,67 @@ import torch.optim
 from torchvision.transforms import ToTensor
 from collections import defaultdict
 from PIL import Image
+from itertools import islice
 
+ftrain = "../fairFace/fairface_label_train.csv"
+fval = "../fairFace/fairface_label_val.csv"
 class Data:
-    def __init__(self):
-        self.train = "../fairFace/fairface_label_train.csv"
-        self.val = "../fairFace/fairface_label_val.csv"
-        self.tt = ToTensor()
+    def __init__(self, fname):
         """
         file,age,gender,race,service_test
         """
-        self.list = [ i for i in open(self.train) ]
+        self.tt = ToTensor()
+        self.list = [ self.imageAge(i) for i in islice(open(fname),1,None) ]
+        self.list  = [ i for i in self.list if i != None ]
+    def __len__(self):
+        return len(self.list)
     def __getitem__(self,idx):
-        filename,age,gender,race,service_test = self.list[idx+1].split(",")
-        print(age)
-        im = self.tt(Image.open("../fairFace/" + filename))
-        lw, up = age.split("-")
-        age = int(lw) + int(up) / 2
-        return im.unsqueeze(0), 1 if age < 30 else 0
-    def setTest(self):
-        self.list = [ i for i in open(self.val) ]
+        #filename, age = self.list[idx]
+        #im = self.tt(Image.open("../fairFace/" + filename))
+        #return im.unsqueeze(0), age
+        return self.list[idx]
+    def imageAge(self,l):
+        filename,age,gender,race,service_test = l.split(",")
+        if "7" in age :
+            age = 1
+        else :
+            lw, up = age.split("-")
+            age = int(lw) + int(up) / 2
+            age = 0 if age < 40 else 1
+        try:
+            im = self.tt(Image.open("../fairFace/" + filename))
+        except :
+            return None
+        return im.unsqueeze(0), age
 
 class Net(nn.Module):
     def __init__(self):
         super(Net,self).__init__()
         self.c0 = nn.Conv2d(3,10,5, stride=2)
-        self.c1 = nn.Conv2d(10,10,5)
-        self.c2 = nn.Conv2d(10,3,3)
-        self.fc3 = nn.Linear(11 * 11 * 3,5)
-        self.fc4 = nn.Linear(5,2)
+        self.c1 = nn.Conv2d(10,30,5)
+        self.c2 = nn.Conv2d(30,10,3)
+        self.fc3 = nn.Linear(11 * 11 * 10,10)
+        self.fc4 = nn.Linear(10,2)
     def forward(self,x):
         x = f.max_pool2d( f.relu(self.c0(x)) ,kernel_size= 2)
         x = f.max_pool2d( f.relu(self.c1(x)) ,kernel_size= 2)
         x = f.max_pool2d( f.relu(self.c2(x)) ,kernel_size= 2)
-        x = x.view(-1, 11 * 11 * 3)
+        x = x.view(-1, 11 * 11 * 10)
         x = f.relu(self.fc3(x))
         x = f.softmax(self.fc4(x),dim=1)
         return x
 
-def train(model,data,epochs=100):
-    model.cuda()
+def train(model,data,epochs=50):
+    model = model.cuda()
     loss = f.cross_entropy
-    op = torch.optim.SGD(model.parameters(),momentum=0.1,lr=0.01)
+    op = torch.optim.Adam(model.parameters(),lr=0.0001)
+    sch = torch.optim.lr_scheduler.ReduceLROnPlateau(op, mode='min', factor=0.1,
+            patience=2, threshold=0.001, threshold_mode='rel', cooldown=0,
+            min_lr=0, eps=1e-08, verbose=True)
     for i in range(epochs):
-        epoch(model,data,loss,op)
+        al = epoch(model,data,loss,op)
+        print(al)
+        sch.step(al)
 
 def test(model,data):
     subset = 10
@@ -57,10 +75,10 @@ def test(model,data):
         im = im.cuda()
         tg = torch.tensor([tg]).cuda()
         ot = model(im)
-
+        print(ot,tg)
 
 def epoch(model,data,loss,op):
-    subset = 10
+    subset = len(data)
     la = torch.tensor(0)
     for i in range(subset):
         im, tg = data[i]
@@ -68,16 +86,16 @@ def epoch(model,data,loss,op):
         tg = torch.tensor([tg]).cuda()
         ot = model(im)
         ls = loss(ot,tg)
-        la = la + ls
-        la = la.detach()
         ls.backward()
         op.step()
         op.zero_grad()
-    print(la/subset)
+        la = la + ls
+        la = la.detach()
+    return (la/subset)
 
 model = Net()
-model = model.cuda()
-data = Data()
-#train(model,data)
-data.setTest()
-test(model,data)
+trainingData = Data(ftrain)
+train(model,trainingData)
+validationData = Data(fval)
+#test(model,validationData)
+torch.save(model.state_dict(),"/pc/facerec/trained.pt")
