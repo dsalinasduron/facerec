@@ -68,11 +68,11 @@ class Net(nn.Module):
         x = f.max_pool2d( f.relu(self.c1(x)) ,kernel_size= 2)
         x = f.max_pool2d( f.relu(self.c2(x)) ,kernel_size= 2)
         x = x.view(-1, 11 * 11 * 10)
-        x = f.relu(self.fc3(x))
-        x = f.softmax(self.fc4(x),dim=1)
+        x_a = f.relu(self.fc3(x))
+        x_a = f.softmax(self.fc4(x_a),dim=1)
         x_b = f.relu(self.fc3_b(x))
-        x_b = f.softmax(self.fc4_b(x),dim=1)
-        return x, x_b
+        x_b = f.softmax(self.fc4_b(x_b),dim=1)
+        return x_a, x_b
 
 def train(model,data,epochs=50):
     model = model.cuda()
@@ -118,10 +118,14 @@ def epochAlg1(model,data,loss,op):
     la = torch.tensor(0)
     for i in range(subset):
         im, tg, tg_b = data[i]
-        exit()
         im = im.cuda()
         tg = torch.tensor([tg]).cuda()
+        tg_b = torch.tensor([tg]).cuda()
         ot = model(im)
+
+        for p in model.fc3_b.parameters() :
+            p.requires_grad = False
+        exit()
         ls = loss(ot,tg)
         ls.backward()
         op.step()
