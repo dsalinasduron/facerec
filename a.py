@@ -7,6 +7,7 @@ from collections import defaultdict
 from PIL import Image
 from itertools import islice
 
+trainingSize = 100
 ftrain = "../fairFace/fairface_label_train.csv"
 fval = "../fairFace/fairface_label_val.csv"
 class Data:
@@ -15,14 +16,12 @@ class Data:
         file,age,gender,race,service_test
         """
         self.tt = ToTensor()
-        self.list = [ self.imageAge(i) for i in islice(open(fname),1,None) ]
+        #self.list = [ self.imageAge(i) for i in islice(open(fname),1,None) ]
+        self.list = [ self.imageAge(i) for i in islice(open(fname),1,trainingSize + 20) ]
         self.list  = [ i for i in self.list if i != None ]
     def __len__(self):
         return len(self.list)
     def __getitem__(self,idx):
-        #filename, age = self.list[idx]
-        #im = self.tt(Image.open("../fairFace/" + filename))
-        #return im.unsqueeze(0), age
         return self.list[idx]
     def imageAge(self,l):
         filename,age,gender,race,service_test = l.split(",")
@@ -41,11 +40,11 @@ class Data:
 class Net(nn.Module):
     def __init__(self):
         super(Net,self).__init__()
-        self.c0 = nn.Conv2d(3,10,5, stride=2)
+        self.c0 = nn.Conv2d(3,10,3, stride=2)
         self.c1 = nn.Conv2d(10,30,5)
         self.c2 = nn.Conv2d(30,10,3)
-        self.fc3 = nn.Linear(11 * 11 * 10,10)
-        self.fc4 = nn.Linear(10,2)
+        self.fc3 = nn.Linear(11 * 11 * 10,20)
+        self.fc4 = nn.Linear(20,2)
     def forward(self,x):
         x = f.max_pool2d( f.relu(self.c0(x)) ,kernel_size= 2)
         x = f.max_pool2d( f.relu(self.c1(x)) ,kernel_size= 2)
@@ -68,6 +67,7 @@ def train(model,data,epochs=50):
         sch.step(al)
 
 def test(model,data):
+    model = model.cuda()
     subset = 10
     d = {0:0, 1:0}
     for i in range(subset):
@@ -78,7 +78,8 @@ def test(model,data):
         print(ot,tg)
 
 def epoch(model,data,loss,op):
-    subset = len(data)
+    #subset = len(data)
+    subset = trainingSize
     la = torch.tensor(0)
     for i in range(subset):
         im, tg = data[i]
@@ -93,9 +94,10 @@ def epoch(model,data,loss,op):
         la = la.detach()
     return (la/subset)
 
-model = Net()
-trainingData = Data(ftrain)
-train(model,trainingData)
-validationData = Data(fval)
-#test(model,validationData)
-torch.save(model.state_dict(),"/pc/facerec/trained.pt")
+if __name__ == "__main__" :
+    model = Net()
+    trainingData = Data(ftrain)
+    #train(model,trainingData)
+    validationData = Data(fval)
+    test(model,validationData)
+    #torch.save(model.state_dict(),"/pc/facerec/trained.pt")
