@@ -16,8 +16,7 @@ class Data:
         file,age,gender,race,service_test
         """
         self.tt = ToTensor()
-        #self.list = [ self.imageAge(i) for i in islice(open(fname),1,None) ]
-        self.list = [ self.imageAge(i) for i in islice(open(fname),1,trainingSize + 20) ]
+        self.list = [ self.imageAgeGender(i) for i in islice(open(fname),1,trainingSize + 20) ]
         self.list  = [ i for i in self.list if i != None ]
     def __len__(self):
         return len(self.list)
@@ -36,6 +35,23 @@ class Data:
         except :
             return None
         return im.unsqueeze(0), age
+    def imageAgeGender(self,l):
+        filename,age,gender,race,service_test = l.split(",")
+        if gender == "Female" :
+            gender = 0
+        else :
+            gender = 1
+        if "7" in age :
+            age = 1
+        else :
+            lw, up = age.split("-")
+            age = int(lw) + int(up) / 2
+            age = 0 if age < 40 else 1
+        try:
+            im = self.tt(Image.open("../fairFace/" + filename))
+        except :
+            return None
+        return im.unsqueeze(0), age, gender
 
 class Net(nn.Module):
     def __init__(self):
@@ -45,6 +61,8 @@ class Net(nn.Module):
         self.c2 = nn.Conv2d(30,10,3)
         self.fc3 = nn.Linear(11 * 11 * 10,20)
         self.fc4 = nn.Linear(20,2)
+        self.fc3_b = nn.Linear(11 * 11 * 10,20)
+        self.fc4_b = nn.Linear(20,2)
     def forward(self,x):
         x = f.max_pool2d( f.relu(self.c0(x)) ,kernel_size= 2)
         x = f.max_pool2d( f.relu(self.c1(x)) ,kernel_size= 2)
@@ -52,7 +70,9 @@ class Net(nn.Module):
         x = x.view(-1, 11 * 11 * 10)
         x = f.relu(self.fc3(x))
         x = f.softmax(self.fc4(x),dim=1)
-        return x
+        x_b = f.relu(self.fc3_b(x))
+        x_b = f.softmax(self.fc4_b(x),dim=1)
+        return x, x_b
 
 def train(model,data,epochs=50):
     model = model.cuda()
@@ -62,7 +82,7 @@ def train(model,data,epochs=50):
             patience=2, threshold=0.001, threshold_mode='rel', cooldown=0,
             min_lr=0, eps=1e-08, verbose=True)
     for i in range(epochs):
-        al = epoch(model,data,loss,op)
+        al = epochAlg1(model,data,loss,op)
         print(al)
         sch.step(al)
 
@@ -78,7 +98,6 @@ def test(model,data):
         print(ot,tg)
 
 def epoch(model,data,loss,op):
-    #subset = len(data)
     subset = trainingSize
     la = torch.tensor(0)
     for i in range(subset):
@@ -94,10 +113,28 @@ def epoch(model,data,loss,op):
         la = la.detach()
     return (la/subset)
 
+def epochAlg1(model,data,loss,op):
+    subset = trainingSize
+    la = torch.tensor(0)
+    for i in range(subset):
+        im, tg, tg_b = data[i]
+        exit()
+        im = im.cuda()
+        tg = torch.tensor([tg]).cuda()
+        ot = model(im)
+        ls = loss(ot,tg)
+        ls.backward()
+        op.step()
+        op.zero_grad()
+        la = la + ls
+        la = la.detach()
+    return (la/subset)
+
+
 if __name__ == "__main__" :
     model = Net()
     trainingData = Data(ftrain)
-    #train(model,trainingData)
-    validationData = Data(fval)
-    test(model,validationData)
+    train(model,trainingData)
+    #validationData = Data(fval)
+    #test(model,validationData)
     #torch.save(model.state_dict(),"/pc/facerec/trained.pt")
