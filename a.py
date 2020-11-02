@@ -53,38 +53,53 @@ class Data:
             return None
         return im.unsqueeze(0), age, gender
 
-class Net(nn.Module):
+class representation(nn.Module):
     def __init__(self):
-        super(Net,self).__init__()
+        super(representation,self).__init__()
         self.c0 = nn.Conv2d(3,10,3, stride=2)
         self.c1 = nn.Conv2d(10,30,5)
         self.c2 = nn.Conv2d(30,10,3)
         self.fc3 = nn.Linear(11 * 11 * 10,20)
-        self.fc4 = nn.Linear(20,2)
-        self.fc3_b = nn.Linear(11 * 11 * 10,20)
-        self.fc4_b = nn.Linear(20,2)
     def forward(self,x):
         x = f.max_pool2d( f.relu(self.c0(x)) ,kernel_size= 2)
         x = f.max_pool2d( f.relu(self.c1(x)) ,kernel_size= 2)
         x = f.max_pool2d( f.relu(self.c2(x)) ,kernel_size= 2)
         x = x.view(-1, 11 * 11 * 10)
-        x_a = f.relu(self.fc3(x))
-        x_a = f.softmax(self.fc4(x_a),dim=1)
-        x_b = f.relu(self.fc3_b(x))
-        x_b = f.softmax(self.fc4_b(x_b),dim=1)
-        return x_a, x_b
+        x = f.relu(self.fc3(x))
+        return x
+
+class head(nn.Module):
+    def __init__(self):
+        super(head,self).__init__()
+        self.fc4 = nn.Linear(20,2)
+
+    def forward(self,x):
+        x = f.softmax(self.fc4(x),dim=1)
+        return x
+
+class Net(nn.Module):
+    def __init__(self):
+        super(Net,self).__init__()
+        self.r = representation()
+        self.primaryHead = head()
+        self.secondaryHead = head()
+    def forward(self,x):
+        x = self.r(x)
+        x_primary = self.primaryHead(x)
+        x_secondary = self.secondaryHead(x)
+        return x_primary, x_secondary
 
 def train(model,data,epochs=50):
     model = model.cuda()
     loss = f.cross_entropy
-    op = torch.optim.Adam(model.parameters(),lr=0.0001)
-    sch = torch.optim.lr_scheduler.ReduceLROnPlateau(op, mode='min', factor=0.1,
-            patience=2, threshold=0.001, threshold_mode='rel', cooldown=0,
-            min_lr=0, eps=1e-08, verbose=True)
+
+    op_r = torch.optim.Adam(model.r.parameters(),lr=0.0001)
+    op_p = torch.optim.Adam(model.primaryHead.parameters(),lr=0.0001)
+    op_s = torch.optim.Adam(model.secondaryHead.parameters(),lr=0.0001)
+
     for i in range(epochs):
-        al = epochAlg1(model,data,loss,op)
+        al = epoch(model,data,loss,op_r,op_s,op_p)
         print(al)
-        sch.step(al)
 
 def test(model,data):
     model = model.cuda()
@@ -97,42 +112,42 @@ def test(model,data):
         ot = model(im)
         print(ot,tg)
 
-def epoch(model,data,loss,op):
+def epoch(model,data,loss,op_r,op_s,op_p):
     subset = trainingSize
     la = torch.tensor(0)
-    for i in range(subset):
-        im, tg = data[i]
-        im = im.cuda()
-        tg = torch.tensor([tg]).cuda()
-        ot = model(im)
-        ls = loss(ot,tg)
+
+    # train secondary
+    for p in model.r.parameters():
+        p.requires_grad = False
+    for i in range(10):
+        break
+        im, age, sex = data[i]
+        im = im.cuda() # put in the gpu
+        tg = torch.tensor([sex]).cuda() # make label a GPU tensor
+        ot_p, ot_s = model(im)
+        ls = loss(ot_s,tg)
         ls.backward()
         op.step()
         op.zero_grad()
-        la = la + ls
-        la = la.detach()
-    return (la/subset)
 
-def epochAlg1(model,data,loss,op):
-    subset = trainingSize
-    la = torch.tensor(0)
+    # train on primary loss and confusion loss
+    # freeze secondary classfier
     for i in range(subset):
-        im, tg, tg_b = data[i]
-        im = im.cuda()
-        tg = torch.tensor([tg]).cuda()
-        tg_b = torch.tensor([tg]).cuda()
-        ot = model(im)
-
-        for p in model.fc3_b.parameters() :
-            p.requires_grad = False
+        im, age, sex = data[i]
+        im = im.cuda() # put in the gpu
+        tg = torch.tensor([age]).cuda() # make label a GPU tensor
+        ot_p, ot_s = model(im)
+        l_p = loss(ot_p,tg)
+        print(torch.sum(torch.log(ot_s[0]) * -1))
         exit()
-        ls = loss(ot,tg)
         ls.backward()
         op.step()
         op.zero_grad()
+
         la = la + ls
         la = la.detach()
     return (la/subset)
+
 
 
 if __name__ == "__main__" :
